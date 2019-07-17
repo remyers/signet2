@@ -115,6 +115,19 @@ void static RandomTransaction(CMutableTransaction &tx, bool fSingle) {
     }
 }
 
+void static MutateInputs(CMutableTransaction &tx, const bool inSequence) {
+    for (int in = 0; in < tx.vin.size(); in++) {
+        CTxIn &txin = tx.vin[in];
+        txin.prevout.hash = InsecureRand256();
+        txin.prevout.n = InsecureRandBits(2);
+
+        if (inSequence) {
+            RandomScript(txin.scriptSig);
+            txin.nSequence = (InsecureRandBool()) ? InsecureRand32() : std::numeric_limits<uint32_t>::max();
+        }
+    }
+}
+
 BOOST_FIXTURE_TEST_SUITE(sighash_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(sighash_test)
@@ -208,4 +221,94 @@ BOOST_AUTO_TEST_CASE(sighash_from_data)
         BOOST_CHECK_MESSAGE(sh.GetHex() == sigHashHex, strTest);
     }
 }
+
+// Goal: check that SignatureHash generates the same hash when inputs are maleated if SIGHASH_NOINPUT is used
+BOOST_AUTO_TEST_CASE(sighash_noinput)
+{
+    SeedInsecureRand(false);
+
+    #if defined(PRINT_SIGHASH_JSON)
+    std::cout << "[\n";
+    std::cout << "\t[\"raw_transaction, script, input_index, hashType, signature_hash (result)\"],\n";
+    int nRandomTests = 500;
+    #else
+    int nRandomTests = 50000;
+    #endif
+    for (int i=0; i<nRandomTests; i++) {
+
+        // Random SigHash, excluding NOINPUT
+        int nHashType = InsecureRand32() & ~SIGHASH_NOINPUT;
+
+        CMutableTransaction txTo;
+        RandomTransaction(txTo, (nHashType & 0x1f) == SIGHASH_SINGLE);
+        CScript scriptCode;
+        RandomScript(scriptCode);
+        int nIn = InsecureRandRange(txTo.vin.size());
+
+        // tx2 is same as tx1 but mutate the input transactions
+        CMutableTransaction tx2To(txTo);       
+        MutateInputs(txTo, false);
+
+        uint256 sho, sho_ni, sho_tx2, sho_tx2_ni;
+        uint256 shb, shb_ni, shb_tx2, shb_tx2_ni;
+        uint256 shv0, shv0_ni, shv0_tx2, shv0_tx2_ni;
+        uint256 shv1, shv1_ni, shv1_tx2, shv1_tx2_ni;
+
+        // test that old signature hash ignores NOINPUT
+        sho = SignatureHashOld(scriptCode, CTransaction(txTo), nIn, nHashType);
+        sho_ni = SignatureHashOld(scriptCode, CTransaction(txTo), nIn, nHashType | SIGHASH_NOINPUT);
+        sho_tx2 = SignatureHashOld(scriptCode, CTransaction(tx2To), nIn, nHashType);
+        sho_tx2_ni = SignatureHashOld(scriptCode, CTransaction(tx2To), nIn, nHashType | SIGHASH_NOINPUT);
+
+        // test that BASE signature hash ignores NOINPUT
+        shb = SignatureHash(scriptCode, txTo, nIn, nHashType, 0, SigVersion::BASE);
+        shb_ni = SignatureHash(scriptCode, txTo, nIn, nHashType | SIGHASH_NOINPUT, 0, SigVersion::BASE);
+        shb_tx2 = SignatureHash(scriptCode, tx2To, nIn, nHashType, 0, SigVersion::BASE);
+        shb_tx2_ni = SignatureHash(scriptCode, tx2To, nIn, nHashType | SIGHASH_NOINPUT, 0, SigVersion::BASE);
+
+        // test that v0 signature hash ignores NOINPUT
+        shv0 = SignatureHash(scriptCode, txTo, nIn, nHashType, 0, SigVersion::WITNESS_V0);
+        shv0_ni = SignatureHash(scriptCode, txTo, nIn, nHashType | SIGHASH_NOINPUT, 0, SigVersion::WITNESS_V0);
+        shv0_tx2 = SignatureHash(scriptCode, tx2To, nIn, nHashType, 0, SigVersion::WITNESS_V0);
+        shv0_tx2_ni = SignatureHash(scriptCode, tx2To, nIn, nHashType | SIGHASH_NOINPUT, 0, SigVersion::WITNESS_V0);
+
+        // test that v1 signature hash respects NOINPUT
+        shv1 = SignatureHash(scriptCode, txTo, nIn, nHashType, 0, SigVersion::WITNESS_V1);
+        shv1_ni = SignatureHash(scriptCode, txTo, nIn, nHashType | SIGHASH_NOINPUT, 0, SigVersion::WITNESS_V1);
+        shv1_tx2 = SignatureHash(scriptCode, tx2To, nIn, nHashType, 0, SigVersion::WITNESS_V1);
+        shv1_tx2_ni = SignatureHash(scriptCode, tx2To, nIn, nHashType | SIGHASH_NOINPUT, 0, SigVersion::WITNESS_V1);      
+
+        #if defined(PRINT_SIGHASH_JSON)
+        CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+        ss << txTo;
+
+        std::cout << "\t[\"" ;
+        std::cout << HexStr(ss.begin(), ss.end()) << "\", \"";
+        std::cout << HexStr(scriptCode) << "\", ";
+        std::cout << nIn << ", ";
+        std::cout << nHashType << ", \"";
+        std::cout << sho.GetHex() << "\"]";
+        if (i+1 != nRandomTests) {
+          std::cout << ",";
+        }
+        std::cout << "\n";
+        #endif
+
+        // legacy, base and v0 signature hashes ignore NO_INPUT
+        BOOST_CHECK(sho != sho_tx2);
+        BOOST_CHECK(sho_ni != sho_tx2_ni);
+        BOOST_CHECK(shb != shb_tx2);
+        BOOST_CHECK(shb_ni != shb_tx2_ni);
+        BOOST_CHECK(shv0 != shv0_tx2);
+        BOOST_CHECK(shv0_ni != shv0_tx2_ni);
+
+        // v1 signature hashes should respect NO_INPUT
+        BOOST_CHECK(shv1 != shv1_tx2);
+        BOOST_CHECK(shv1_ni == shv1_tx2_ni);
+    }
+    #if defined(PRINT_SIGHASH_JSON)
+    std::cout << "]\n";
+    #endif
+}
+
 BOOST_AUTO_TEST_SUITE_END()
