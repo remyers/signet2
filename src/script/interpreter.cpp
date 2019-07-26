@@ -939,6 +939,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                     {
                     case SigVersion::BASE:
                     case SigVersion::WITNESS_V0:
+                    case SigVersion::WITNESS_V1:
                     {
                         // Subset of script starting at the most recent codeseparator
                         execdata.m_scriptcode = CScript(pbegincodehash, pend);
@@ -1562,6 +1563,7 @@ bool GenericTransactionSignatureChecker<T>::CheckSig(const std::vector<unsigned 
     switch (sigversion) {
     case SigVersion::BASE:
     case SigVersion::WITNESS_V0:
+    case SigVersion::WITNESS_V1:
         {
             int nHashType = vchSig.back();
             vchSig.pop_back();
@@ -1699,7 +1701,7 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
     ScriptExecutionData execdata;
 
     if (witversion == 0) {
-        sigversion = SigVersion::WITNESS_V0;
+        sigversion = !(flags & SCRIPT_VERIFY_ANYPREVOUT) ? SigVersion::WITNESS_V0 : SigVersion::WITNESS_V1;
         if (program.size() == WITNESS_V0_SCRIPTHASH_SIZE) {
             // Version 0 segregated witness program: SHA256(CScript) inside the program, CScript + inputs in witness
             if (witness.stack.size() == 0) {

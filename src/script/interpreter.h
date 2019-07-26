@@ -179,7 +179,7 @@ enum class SigVersion
     TAPROOT = 2,
     TAPSCRIPT = 3,
     ANYPREVOUT = 4,
-    WITNESS_V1 = 2,
+    WITNESS_V1 = 5,
 };
 
 struct ScriptExecutionData
