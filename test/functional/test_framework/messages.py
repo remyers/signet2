@@ -275,7 +275,7 @@ class CBlockLocator:
 class COutPoint:
     __slots__ = ("hash", "n")
 
-    def __init__(self, hash=0, n=0):
+    def __init__(self, hash=0, n=0xffffffff):
         self.hash = hash
         self.n = n
 
